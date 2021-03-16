@@ -15,6 +15,8 @@ struct sockaddr_in serv_addr, client;
 const char serial_port[] = "/dev/ttyAMA0";
 int fd, baudrate=B115200, server_socket, client_socket;
 
+void accept_client();
+
 /* ****************************************
  * Function name: setup_uart()
  *
@@ -78,7 +80,17 @@ int setup_socket() {
 		printf("[ERROR] can't create socket.\n");
 		return -1;
 	}
-	/* Allow address reuse on socket */
+
+	// struct linger sl;
+	// sl.l_onoff = 1;		/* non-zero value enables linger option in kernel */
+	// sl.l_linger = 0;	/* timeout interval in seconds */
+
+	// if(setsockopt(server_socket, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl))){
+	// 	perror("[ERROR] setsockopt");
+	// 	exit(EXIT_FAILURE);
+	// }
+
+	// /* Allow address reuse on socket */
 	if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
 		perror("[ERROR] setsockopt");
 		exit(EXIT_FAILURE);
@@ -99,32 +111,35 @@ int setup_socket() {
 		perror("[ERROR] can't listen to socket.");
 		exit(EXIT_FAILURE);
 	}
-	addrlen = sizeof(struct sockaddr_in);
-	socklen_t sin_size = sizeof(struct sockaddr_in);
+
 	/* Accept a connection */
-	if ((client_socket = accept(server_socket, (struct sockaddr *)&client, &sin_size)) < 0) {
-	        perror("[ERROR] can't accept new connections");
-	        exit(EXIT_FAILURE);
-	}
-	char *client_ip = inet_ntoa(client.sin_addr);
-	printf("[INFO] accepted new connection from client %s:%d\n", client_ip, ntohs(client.sin_port));
+	accept_client();
+
 	return 0;
 }
 
 /* ****************************************
- * Function name: reconnect_socket()
+ * Function name: accept_client()
  * 
  * Description:
  * 		Reconnect socket
  * 
  *************************************** */
-void reconnect_socket() {
+void accept_client() {
 	socklen_t sin_size = sizeof(struct sockaddr_in);
-	close(client_socket);
+	//close(client_socket);
+	client_socket = -1;
 	if ((client_socket = accept(server_socket, (struct sockaddr *)&client, &sin_size)) < 0) {
 		perror("[WARNING] can't connect to remote server, will try again in 5 seconds...\n");
 		sleep(5);
 	}
+	char *client_ip = inet_ntoa(client.sin_addr);
+	printf("[INFO] accepted new connection from client %s:%d\n", client_ip, ntohs(client.sin_port));
+
+	struct timeval tv;
+	tv.tv_sec = 10;
+	tv.tv_usec = 0;
+	setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 }
 
 /* ****************************************
@@ -136,19 +151,22 @@ void reconnect_socket() {
  *************************************** */
 void reconnect_uart() {
 	close(fd);
-	if((fd = open(serial_port, O_RDWR)) < 0) {
-		perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
-	}
+	fd = -1;
+	//if((fd = open(serial_port, O_RDWR)) < 0) {
+	//	perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
+	//}
+	setup_uart();
+	
 }
 
 /* ****************************************
- * Function name: thread_socket
+ * Function name: thread_socketsss
  *
  * Description:
  * 		Forward socket data to UART
  *
  *************************************** */
-void *thread_socket() {
+static void *thread_socket(void * arg) {
 	int valread;
 	char buffer[4096] = {0};
 	/* Reading all the time */
@@ -157,14 +175,15 @@ void *thread_socket() {
 		valread = read(client_socket, buffer, sizeof(buffer));
 		if(valread > 0) {
 			printf("[INFO] forwarding data from socket to UART...\n");
+			printf("Buffer : %s \n" ,buffer);
 			int written = write(fd, buffer, valread);
 			if(written < 0) {
 				printf("[WARNING] can't write UART.\n");
 				reconnect_uart();
 			}
-		} else if(valread < 0) {
+		} else if(valread <= 0) {
 			printf("[WARNING] can't read socket.\n");
-			reconnect_socket();
+			accept_client();
 		}
 	}
 }
@@ -176,7 +195,7 @@ void *thread_socket() {
  * 		Forward UART data to socket
  * 
  *************************************** */
-void *thread_uart() {
+  static void * thread_uart(void * arg) {
 	int valread;
 	char buffer[4096] = {0};
 	/* Reading all the time */
@@ -191,7 +210,7 @@ void *thread_uart() {
 			int written = write(client_socket, buffer, valread);
 			if (written < 0) {
 				printf("[WARNING] can't write socket... \n");
-				reconnect_socket();
+				accept_client();
 			}
 		}
 	}
