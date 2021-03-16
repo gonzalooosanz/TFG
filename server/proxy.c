@@ -106,12 +106,21 @@ int setup_socket() {
  * 		Reconnect socket
  * 
  *************************************** */
+// void reconnect_socket2() {
+// 	//close(client_socket);
+// 	if (connect(client_socket, (struct sockaddr *)&client, sizeof(client)) < 0) {
+// 		perror("[WARNING] can't connect to remote server, will try again in 5 seconds...\n");
+// 		sleep(5);
+// 	}
+// }
+
 void reconnect_socket() {
 	close(client_socket);
-	if (connect(client_socket, (struct sockaddr *)&client, sizeof(client)) < 0) {
-		perror("[WARNING] can't connect to remote server, will try again in 5 seconds...\n");
-		sleep(5);
-	}
+	// if (connect(client_socket, (struct sockaddr *)&client, sizeof(client)) < 0) {
+	// 	perror("[WARNING] can't connect to remote server, will try again in 5 seconds...\n");
+	// 	sleep(5);
+	// }
+	setup_socket();
 }
 
 /* ****************************************
@@ -123,10 +132,13 @@ void reconnect_socket() {
  *************************************** */
 void reconnect_uart() {
 	close(fd);
-	if((fd = open(serial_port, O_RDWR)) < 0) {
-		perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
-	}
+	fd = -1;
+	//if((fd = open(serial_port, O_RDWR)) < 0) {
+	//	perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
+	//}
+	setup_uart();
 }
+
 
 /* ****************************************
  * Function name: thread_socket
@@ -149,10 +161,11 @@ void *thread_socket() {
 				printf("[WARNING] can't write UART.\n");
 				reconnect_uart();
 			}
-		} else if(valread < 0) {
+		} else if(valread <= 0) {
 			printf("[WARNING] can't read socket.\n");
 			reconnect_socket();
 		}
+		//else reconnect_socket2();
 	} 
 }
 
@@ -173,9 +186,12 @@ void *thread_uart() {
 		if (valread < 0) {
 			printf("[WARNING] can't read UART.\n");
 			reconnect_uart();
-		} else if(valread > 0) {
+		} 
+		else if(valread > 0) {
 			printf("[INFO] forwarding data from UART to socket...\n");
 			int written = write(client_socket, buffer, valread);
+			printf("Buffer : %s \n" ,buffer);
+			
 			if (written < 0) {
 				printf("[WARNING] can't write socket... \n");
 				reconnect_socket();
@@ -194,7 +210,6 @@ void *thread_uart() {
  *************************************** */
 int main() {
    	pthread_t h1, h2;
-	printf("KKK");
 	setup_uart();
 	setup_socket();
 	pthread_create(&h1, NULL, thread_socket, NULL);
