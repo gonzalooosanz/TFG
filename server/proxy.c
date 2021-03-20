@@ -12,7 +12,7 @@
 #include <signal.h>
 
 struct sockaddr_in serv_addr, client;
-const char serial_port[] = "/dev/ttyUSB0"; 
+const char serial_port[] = "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller-if00-port0"; 
 int fd, baudrate=B115200, client_socket;
 
 /* ****************************************
@@ -27,7 +27,7 @@ int setup_uart() {
 	if((fd = open(serial_port, O_RDWR)) < 0) {
 		return 1;
 	}
-	/* Configure Port */	
+	/* Configure Port */	///dev/ttyAMA0
 	struct termios tty;
 	memset(&tty, 0, sizeof tty);
 	/* Error Handling */
@@ -57,11 +57,40 @@ int setup_uart() {
 	if (tcsetattr(fd, TCSANOW, &tty) != 0) {
    		printf("[ERROR] result %i from tcsetattr: %s\n", errno, strerror(errno));
 	}
-	printf("[INFO] Serial communication opened, using port %s.\n", serial_port);
+	 
+	// Enlace simbolico de puerto USB
+
+	char target_path[256];
+	char* link_path = serial_port;
+
+	/* Attempt to read the target of the symbolic link. */
+	int len = readlink (link_path, target_path, sizeof (target_path));
+	
+	if (len == -1) {
+		/* The call failed. */
+		if (errno == EINVAL)
+		/* It's not a symbolic link; report that. */
+		fprintf (stderr, "%s is not a symbolic link\n", link_path);
+		else
+		/* Some other problem occurred; print the generic message. */
+		perror ("readlink");
+		return 1;
+	}
+
+	printf("[INFO] Serial communication opened, using port %s.\n", target_path);
 	fflush(stdout);
 
 	return 0;
 }
+
+
+// void reconnect_to_port(){
+
+// 	printf("Reconnecting to the new port \n");
+// 	if((fd = open(serial_port, O_RDWR)) < 0) {
+// 		return 1;
+// 	}
+// }
 
 /* ****************************************
  * Function name: setup_socket()
@@ -106,20 +135,13 @@ int setup_socket() {
  * 		Reconnect socket
  * 
  *************************************** */
-// void reconnect_socket2() {
-// 	//close(client_socket);
-// 	if (connect(client_socket, (struct sockaddr *)&client, sizeof(client)) < 0) {
-// 		perror("[WARNING] can't connect to remote server, will try again in 5 seconds...\n");
-// 		sleep(5);
-// 	}
-// }
 
 void reconnect_socket() {
+	
 	close(client_socket);
-	// if (connect(client_socket, (struct sockaddr *)&client, sizeof(client)) < 0) {
-	// 	perror("[WARNING] can't connect to remote server, will try again in 5 seconds...\n");
-	// 	sleep(5);
-	// }
+
+	printf("[INFO] Reconnecting to SOCKET ...\n");
+
 	setup_socket();
 }
 
@@ -132,10 +154,10 @@ void reconnect_socket() {
  *************************************** */
 void reconnect_uart() {
 	close(fd);
-	fd = -1;
-	//if((fd = open(serial_port, O_RDWR)) < 0) {
-	//	perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
-	//}
+	//fd = -1;
+
+	printf("[INFO] Reconnecting to UART ...\n");
+
 	setup_uart();
 }
 
@@ -163,9 +185,11 @@ void *thread_socket() {
 			}
 		} else if(valread <= 0) {
 			printf("[WARNING] can't read socket.\n");
+			if((fd = open(serial_port, O_RDWR)) < 0) {
+				perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
+			}
 			reconnect_socket();
 		}
-		//else reconnect_socket2();
 	} 
 }
 
