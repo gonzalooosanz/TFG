@@ -12,7 +12,7 @@
 #include <signal.h>
 
 struct sockaddr_in serv_addr, client;
-const char serial_port[] = "/dev/ttyAMA0";
+const char serial_port[] = "/dev/serial0";
 int fd, baudrate=B115200, server_socket, client_socket;
 
 void accept_client();
@@ -59,7 +59,27 @@ int setup_uart() {
 	if (tcsetattr(fd, TCSANOW, &tty) != 0) {
     		printf("[ERROR] result %i from tcsetattr: %s\n", errno, strerror(errno));
 	}
-	printf("[INFO] Serial communication opened, using port %s.\n", serial_port);
+
+	// Enlace simbolico de puerto AMA
+
+	char target_path[256];
+	char* link_path = serial_port;
+
+	/* Attempt to read the target of the symbolic link. */
+	int len = readlink (link_path, target_path, sizeof (target_path));
+	
+	if (len == -1) {
+		/* The call failed. */
+		if (errno == EINVAL)
+		/* It's not a symbolic link; report that. */
+		fprintf (stderr, "%s is not a symbolic link\n", link_path);
+		else
+		/* Some other problem occurred; print the generic message. */
+		perror ("readlink");
+		return 1;
+	}
+
+	printf("[INFO] Serial communication opened, using port %s.\n", target_path);
 	fflush(stdout);
 
 	return 0;
@@ -80,15 +100,6 @@ int setup_socket() {
 		printf("[ERROR] can't create socket.\n");
 		return -1;
 	}
-
-	// struct linger sl;
-	// sl.l_onoff = 1;		/* non-zero value enables linger option in kernel */
-	// sl.l_linger = 0;	/* timeout interval in seconds */
-
-	// if(setsockopt(server_socket, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl))){
-	// 	perror("[ERROR] setsockopt");
-	// 	exit(EXIT_FAILURE);
-	// }
 
 	// /* Allow address reuse on socket */
 	if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
