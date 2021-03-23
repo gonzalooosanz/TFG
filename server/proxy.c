@@ -9,11 +9,13 @@
 #include <errno.h> // Error integer and strerror() function
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
-#include <signal.h>
+#include <signal.h> 
+#include <dirent.h>
 
 struct sockaddr_in serv_addr, client;
-const char serial_port[] = "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller-if00-port0"; 
+//const char serial_port[] = "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller-if00-port0"; 
 int fd, baudrate=B115200, client_socket;
+
 
 /* ****************************************
  * Function name: setup_uart()
@@ -22,11 +24,26 @@ int fd, baudrate=B115200, client_socket;
  * 		Open UART communication
  * 
  *************************************** */
+
 int setup_uart() {
-	/* Start UART communication */
-	if((fd = open(serial_port, O_RDWR)) < 0) {
-		return 1;
-	}
+	char dev_port[15] = "/dev/";
+	DIR *mydir;
+    struct dirent *myfile;
+    mydir = opendir(dev_port);
+    while((myfile = readdir(mydir)) != NULL)
+    {      
+		if(strncmp(myfile->d_name, "ttyUSB",5) == 0){
+			strcat(dev_port, myfile->d_name);
+			/* Start UART communication */
+			if((fd = open(dev_port, O_RDWR)) < 0) {
+			   fprintf(stderr, "Cannot open %s\n", dev_port);
+               exit(EXIT_FAILURE);
+			}
+        }
+    }
+
+    closedir(mydir);
+
 	/* Configure Port */	///dev/ttyAMA0
 	struct termios tty;
 	memset(&tty, 0, sizeof tty);
@@ -57,40 +74,14 @@ int setup_uart() {
 	if (tcsetattr(fd, TCSANOW, &tty) != 0) {
    		printf("[ERROR] result %i from tcsetattr: %s\n", errno, strerror(errno));
 	}
-	 
-	// Enlace simbolico de puerto USB
 
-	char target_path[256];
-	char* link_path = serial_port;
-
-	/* Attempt to read the target of the symbolic link. */
-	int len = readlink (link_path, target_path, sizeof (target_path));
+	printf("[INFO] Serial communication opened, using port %s\n", dev_port);
 	
-	if (len == -1) {
-		/* The call failed. */
-		if (errno == EINVAL)
-		/* It's not a symbolic link; report that. */
-		fprintf (stderr, "%s is not a symbolic link\n", link_path);
-		else
-		/* Some other problem occurred; print the generic message. */
-		perror ("readlink");
-		return 1;
-	}
-
-	printf("[INFO] Serial communication opened, using port %s.\n", target_path);
 	fflush(stdout);
 
 	return 0;
 }
 
-
-// void reconnect_to_port(){
-
-// 	printf("Reconnecting to the new port \n");
-// 	if((fd = open(serial_port, O_RDWR)) < 0) {
-// 		return 1;
-// 	}
-// }
 
 /* ****************************************
  * Function name: setup_socket()
@@ -154,7 +145,6 @@ void reconnect_socket() {
  *************************************** */
 void reconnect_uart() {
 	close(fd);
-	//fd = -1;
 
 	printf("[INFO] Reconnecting to UART ...\n");
 
@@ -185,9 +175,6 @@ void *thread_socket() {
 			}
 		} else if(valread <= 0) {
 			printf("[WARNING] can't read socket.\n");
-			if((fd = open(serial_port, O_RDWR)) < 0) {
-				perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
-			}
 			reconnect_socket();
 		}
 	} 
