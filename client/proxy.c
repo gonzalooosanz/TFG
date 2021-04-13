@@ -10,10 +10,16 @@
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
 #include <signal.h>
+#include <stdbool.h>
+
 
 struct sockaddr_in serv_addr, client;
 const char serial_port[] = "/dev/serial0";
 int fd, baudrate=B115200, server_socket, client_socket;
+
+bool accepted = false;
+
+pthread_mutex_t mutex;
 
 void accept_client();
 
@@ -63,7 +69,7 @@ int setup_uart() {
 	// Enlace simbolico de puerto AMA
 
 	char target_path[256];
-	char* link_path = serial_port;
+	const char* link_path = serial_port;
 
 	/* Attempt to read the target of the symbolic link. */
 	int len = readlink (link_path, target_path, sizeof (target_path));
@@ -194,7 +200,14 @@ static void *thread_socket(void * arg) {
 			}
 		} else if(valread <= 0) {
 			printf("[WARNING] can't read socket.\n");
+			accepted = true;
+			
+		}
+		if(accepted){
+			pthread_mutex_lock(&mutex);
 			accept_client();
+			accepted = false;
+			pthread_mutex_unlock(&mutex);
 		}
 	}
 }
@@ -221,7 +234,9 @@ static void *thread_socket(void * arg) {
 			int written = write(client_socket, buffer, valread);
 			if (written < 0) {
 				printf("[WARNING] can't write socket... \n");
-				accept_client();
+				pthread_mutex_lock(&mutex);
+				accepted= true;
+				pthread_mutex_unlock(&mutex);
 			}
 		}
 	}
@@ -240,6 +255,7 @@ int main() {
 
 	setup_uart();
 	setup_socket();
+	pthread_mutex_init(&mutex,NULL);
 	pthread_create(&h1, NULL, thread_socket, NULL);
    	pthread_create(&h2, NULL, thread_uart, NULL);
 
