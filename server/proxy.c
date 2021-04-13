@@ -11,11 +11,15 @@
 #include <unistd.h> // write(), read(), close()
 #include <signal.h> 
 #include <dirent.h>
+#include <stdbool.h>
 
 struct sockaddr_in serv_addr, client;
 //const char serial_port[] = "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller-if00-port0"; 
 int fd, baudrate=B115200, client_socket;
 
+bool prueba = false;
+pthread_mutex_t mutex;
+char devPort[] = "";
 
 /* ****************************************
  * Function name: setup_uart()
@@ -35,7 +39,9 @@ int setup_uart() {
 		if(strncmp(myfile->d_name, "ttyUSB",5) == 0){
 			strcat(dev_port, myfile->d_name);
 			/* Start UART communication */
+			  strcpy(devPort, dev_port);
 			if((fd = open(dev_port, O_RDWR)) < 0) {
+			 
 			   fprintf(stderr, "Cannot open %s\n", dev_port);
                exit(EXIT_FAILURE);
 			}
@@ -132,7 +138,23 @@ void reconnect_socket() {
 	close(client_socket);
 
 	printf("[INFO] Reconnecting to SOCKET ...\n");
-
+	char dev_port[15] = "/dev/";
+	DIR *mydir;
+    struct dirent *myfile;
+    mydir = opendir(dev_port);
+	myfile = readdir(mydir);
+	if(strncmp(myfile->d_name, "ttyUSB",5) == 0){
+			strcat(dev_port, myfile->d_name);
+			/* Start UART communication */
+			printf(" Estos son mis puertos %s, %s", devPort, dev_port);
+			if(strcmp(devPort, dev_port) == 0){
+				reconnect_uart();
+			}
+	}
+	
+    closedir(mydir);
+ 	
+	// Cerrojo que bloquea 
 	setup_socket();
 }
 
@@ -159,7 +181,7 @@ void reconnect_uart() {
  * 		Forward socket data to UART
  * 
  *************************************** */
-void *thread_socket() {
+static void *thread_socket(void * arg) {
 	int valread;
 	char buffer[4096] = {0};
 	/* Reading all the time */
@@ -175,7 +197,17 @@ void *thread_socket() {
 			}
 		} else if(valread <= 0) {
 			printf("[WARNING] can't read socket.\n");
+			//reconnect_socket();
+			prueba = true;
+		}
+
+		if(prueba){
+			pthread_mutex_lock(&mutex);
+			sleep(5);
+			printf("Estoy reconectandome wacho \n");
 			reconnect_socket();
+			prueba = false;
+			pthread_mutex_unlock(&mutex);
 		}
 	} 
 }
@@ -187,7 +219,7 @@ void *thread_socket() {
  * 		Forward UART data to socket
  * 
  *************************************** */
-void *thread_uart() {
+  static void * thread_uart(void * arg) {
 	int valread;
 	char buffer[4096] = {0}; 
 	/* Reading all the time */
@@ -205,9 +237,15 @@ void *thread_uart() {
 			
 			if (written < 0) {
 				printf("[WARNING] can't write socket... \n");
-				reconnect_socket();
+				//reconnect_socket(); 
+				// Habria que utiizar semoforos para que cuando leamos tenag el cerrojo y este cuando intente escriibir no puueda 
+				// y se tenbnga que esperar a que termine el otro
+				pthread_mutex_lock(&mutex);
+				prueba = true;
+				pthread_mutex_unlock(&mutex);
 			}
 		}
+
 	}
 }
 
@@ -223,6 +261,7 @@ int main() {
    	pthread_t h1, h2;
 	setup_uart();
 	setup_socket();
+    pthread_mutex_init(&mutex, NULL);
 	pthread_create(&h1, NULL, thread_socket, NULL);
    	pthread_create(&h2, NULL, thread_uart, NULL);
 	
