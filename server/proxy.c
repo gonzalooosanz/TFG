@@ -19,6 +19,7 @@ int fd, baudrate=B115200, client_socket;
 
 bool prueba = false;
 pthread_mutex_t mutex;
+pthread_mutex_t mutex_uart;
 char devPort[] = "";
 
 /* ****************************************
@@ -138,21 +139,12 @@ void reconnect_socket() {
 	close(client_socket);
 
 	printf("[INFO] Reconnecting to SOCKET ...\n");
-	char dev_port[15] = "/dev/";
-	DIR *mydir;
-    struct dirent *myfile;
-    mydir = opendir(dev_port);
-	myfile = readdir(mydir);
-	if(strncmp(myfile->d_name, "ttyUSB",5) == 0){
-			strcat(dev_port, myfile->d_name);
-			/* Start UART communication */
-			printf(" Estos son mis puertos %s, %s", devPort, dev_port);
-			if(strcmp(devPort, dev_port) == 0){
-				reconnect_uart();
-			}
+
+	if((fd = open(devPort, O_RDWR)) < 0) {
+		pthread_mutex_lock(&mutex_uart);
+		reconnect_uart();
+		pthread_mutex_unlock(&mutex_uart);
 	}
-	
-    closedir(mydir);
  	
 	// Cerrojo que bloquea 
 	setup_socket();
@@ -193,7 +185,9 @@ static void *thread_socket(void * arg) {
 			int written = write(fd, buffer, valread);
 			if(written < 0) {
 				printf("[WARNING] can't write UART.\n");
+				pthread_mutex_lock(&mutex_uart);
 				reconnect_uart();
+				pthread_mutex_unlock(&mutex_uart);
 			}
 		} else if(valread <= 0) {
 			printf("[WARNING] can't read socket.\n");
@@ -203,7 +197,7 @@ static void *thread_socket(void * arg) {
 
 		if(prueba){
 			pthread_mutex_lock(&mutex);
-			sleep(5);
+			//sleep(5);
 			printf("Estoy reconectandome wacho \n");
 			reconnect_socket();
 			prueba = false;
@@ -228,12 +222,14 @@ static void *thread_socket(void * arg) {
 		valread = read(fd, buffer, sizeof(buffer));
 		if (valread < 0) {
 			printf("[WARNING] can't read UART.\n");
+			pthread_mutex_lock(&mutex_uart);
 			reconnect_uart();
+			pthread_mutex_unlock(&mutex_uart);
 		} 
 		else if(valread > 0) {
 			printf("[INFO] forwarding data from UART to socket...\n");
 			int written = write(client_socket, buffer, valread);
-			printf("Buffer : %s \n" ,buffer);
+			printf("Buffer: %s \n" ,buffer);
 			
 			if (written < 0) {
 				printf("[WARNING] can't write socket... \n");
@@ -262,6 +258,7 @@ int main() {
 	setup_uart();
 	setup_socket();
     pthread_mutex_init(&mutex, NULL);
+	pthread_mutex_init(&mutex_uart, NULL);
 	pthread_create(&h1, NULL, thread_socket, NULL);
    	pthread_create(&h2, NULL, thread_uart, NULL);
 	
