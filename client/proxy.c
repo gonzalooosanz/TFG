@@ -10,10 +10,19 @@
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
 #include <signal.h>
+#include <stdbool.h>
+
+enum State {CONNECTED, DISCONNECTED, RECONNECTING} state;
 
 struct sockaddr_in serv_addr, client;
-const char serial_port[] = "/dev/ttyAMA0";
+const char serial_port[] = "/dev/serial0";
 int fd, baudrate=B115200, server_socket, client_socket;
+
+bool accepted = false, desconectado = false, reconnecting = false;
+
+pthread_mutex_t mutex;
+
+void accept_client();
 
 /* ****************************************
  * Function name: setup_uart()
@@ -27,6 +36,7 @@ int setup_uart() {
 	if((fd = open(serial_port, O_RDWR)) < 0) {
 		return 1;
 	}
+
 	/* Configure Port */
 	struct termios tty;
 	memset(&tty, 0, sizeof tty);
@@ -57,7 +67,27 @@ int setup_uart() {
 	if (tcsetattr(fd, TCSANOW, &tty) != 0) {
     		printf("[ERROR] result %i from tcsetattr: %s\n", errno, strerror(errno));
 	}
-	printf("[INFO] Serial communication opened, using port %s.\n", serial_port);
+
+	// Enlace simbolico de puerto AMA
+
+	char target_path[256];
+	const char* link_path = serial_port;
+
+	/* Attempt to read the target of the symbolic link. */
+	int len = readlink (link_path, target_path, sizeof (target_path));
+	
+	if (len == -1) {
+		/* The call failed. */
+		if (errno == EINVAL)
+		/* It's not a symbolic link; report that. */
+		fprintf (stderr, "%s is not a symbolic link\n", link_path);
+		else
+		/* Some other problem occurred; print the generic message. */
+		perror ("readlink");
+		return 1;
+	}
+
+	printf("[INFO] Serial communication opened, using port %s.\n", target_path);
 	fflush(stdout);
 
 	return 0;
@@ -78,7 +108,8 @@ int setup_socket() {
 		printf("[ERROR] can't create socket.\n");
 		return -1;
 	}
-	/* Allow address reuse on socket */
+
+	// /* Allow address reuse on socket */
 	if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
 		perror("[ERROR] setsockopt");
 		exit(EXIT_FAILURE);
@@ -99,32 +130,35 @@ int setup_socket() {
 		perror("[ERROR] can't listen to socket.");
 		exit(EXIT_FAILURE);
 	}
-	addrlen = sizeof(struct sockaddr_in);
-	socklen_t sin_size = sizeof(struct sockaddr_in);
+
 	/* Accept a connection */
-	if ((client_socket = accept(server_socket, (struct sockaddr *)&client, &sin_size)) < 0) {
-	        perror("[ERROR] can't accept new connections");
-	        exit(EXIT_FAILURE);
-	}
-	char *client_ip = inet_ntoa(client.sin_addr);
-	printf("[INFO] accepted new connection from client %s:%d\n", client_ip, ntohs(client.sin_port));
+	accept_client();
+
 	return 0;
 }
 
 /* ****************************************
- * Function name: reconnect_socket()
+ * Function name: accept_client()
  * 
  * Description:
  * 		Reconnect socket
  * 
  *************************************** */
-void reconnect_socket() {
+void accept_client() {
 	socklen_t sin_size = sizeof(struct sockaddr_in);
-	close(client_socket);
+	//close(client_socket);
+	client_socket = -1;
 	if ((client_socket = accept(server_socket, (struct sockaddr *)&client, &sin_size)) < 0) {
 		perror("[WARNING] can't connect to remote server, will try again in 5 seconds...\n");
 		sleep(5);
 	}
+	char *client_ip = inet_ntoa(client.sin_addr);
+	printf("[INFO] accepted new connection from client %s:%d\n", client_ip, ntohs(client.sin_port));
+
+	struct timeval tv;
+	tv.tv_sec = 10;
+	tv.tv_usec = 0;
+	setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 }
 
 /* ****************************************
@@ -136,38 +170,64 @@ void reconnect_socket() {
  *************************************** */
 void reconnect_uart() {
 	close(fd);
-	if((fd = open(serial_port, O_RDWR)) < 0) {
-		perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
-	}
+	fd = -1;
+
+	setup_uart();
+	
 }
 
 /* ****************************************
- * Function name: thread_socket
+ * Function name: thread_socketsss
  *
  * Description:
  * 		Forward socket data to UART
  *
  *************************************** */
-void *thread_socket() {
+ void *thread_socket(void * arg) {
 	int valread;
 	char buffer[4096] = {0};
 	/* Reading all the time */
 	for(;;) {
+		if (state == CONNECTED)
+		{
 		memset(buffer, 0, sizeof(buffer));
 		valread = read(client_socket, buffer, sizeof(buffer));
+		//valread = recv(client_socket, buffer, sizeof(buffer), MSG_WAITALL);
 		if(valread > 0) {
 			printf("[INFO] forwarding data from socket to UART...\n");
+		
 			int written = write(fd, buffer, valread);
+			printf("Buffer : %s \n" ,buffer);
+			//int written = send(fd, buffer, valread, 0);
 			if(written < 0) {
 				printf("[WARNING] can't write UART.\n");
-				reconnect_uart();
+				pthread_mutex_lock(&mutex);
+				if (state == CONNECTED)
+				{
+					reconnecting = true; // Reconnect_uart
+				}
+				pthread_mutex_unlock(&mutex);
+				
 			}
-		} else if(valread < 0) {
+		} else if(valread <= 0) {
 			printf("[WARNING] can't read socket.\n");
-			reconnect_socket();
+			pthread_mutex_lock(&mutex);
+			if (state == CONNECTED )
+			{
+				accepted = true;
+			}
+			pthread_mutex_unlock(&mutex);
+			
 		}
+		// if(accepted){
+		// 	pthread_mutex_lock(&mutex);
+		// 	accept_client();
+		// 	accepted = false;
+		// 	pthread_mutex_unlock(&mutex);
+		// }
 	}
 }
+ }
 
 /* ****************************************
  * Function name: thread_uart
@@ -176,24 +236,43 @@ void *thread_socket() {
  * 		Forward UART data to socket
  * 
  *************************************** */
-void *thread_uart() {
+ void * thread_uart(void * arg) {
 	int valread;
 	char buffer[4096] = {0};
 	/* Reading all the time */
 	for(;;) {
+		if (state == CONNECTED){
+		
 		memset(buffer, 0, sizeof(buffer));
 		valread = read(fd, buffer, sizeof(buffer));
+		//valread = recv(fd, buffer, sizeof(buffer), MSG_WAITALL);
 		if (valread < 0) {
 			printf("[WARNING] can't read UART.\n");
-			reconnect_uart();
-		} else if(valread > 0) {
+			pthread_mutex_lock(&mutex);
+			if (state == CONNECTED)
+			{
+				reconnecting = true;
+			}
+			pthread_mutex_unlock(&mutex);
+		}
+
+		else if(valread > 0) {
 			printf("[INFO] forwarding data from UART to socket...\n");
 			int written = write(client_socket, buffer, valread);
+			//ssize_t written = send(client_socket, buffer, valread, 0);
 			if (written < 0) {
 				printf("[WARNING] can't write socket... \n");
-				reconnect_socket();
+				pthread_mutex_lock(&mutex);
+				if (state == CONNECTED)
+				{
+					accepted = true;
+				}
+				pthread_mutex_unlock(&mutex);
 			}
 		}
+
+		}
+		
 	}
 }
 
@@ -206,14 +285,72 @@ void *thread_uart() {
  *
  *************************************** */
 int main() {
-   	pthread_t h1, h2;
 
-	setup_uart();
-	setup_socket();
+	pthread_t h1, h2;
+	state = DISCONNECTED;
+	// setup_uart();
+	// setup_socket();
+    pthread_mutex_init(&mutex, NULL);
 	pthread_create(&h1, NULL, thread_socket, NULL);
    	pthread_create(&h2, NULL, thread_uart, NULL);
+	
+	// 
+	for(;;) {
+		switch (state)
+		{
+			case DISCONNECTED:
+				// Iniciar la comunicacion
+				pthread_mutex_lock(&mutex);		
+				int uart = setup_uart();
+				int socket = setup_socket();
 
-	for(;;) {}
+				if(uart == 0 && socket == 0){
+					state = CONNECTED;
+				}
+				desconectado = false;
+				accepted = false;
+				pthread_mutex_unlock(&mutex);
+			break;
+			
+			case CONNECTED:
+				if(desconectado) {
+					printf("Desconectado \n");
+					pthread_mutex_lock(&mutex);
+					state = DISCONNECTED;
+					pthread_mutex_unlock(&mutex);
+				
+				}
+				else if(accepted){
+					printf(" Aceptamos nuevas conexiones \n");
+					pthread_mutex_lock(&mutex);
+					accept_client();
+				
+					accepted = false;
+					pthread_mutex_unlock(&mutex);
+				}
+
+				else if(reconnecting){
+					pthread_mutex_lock(&mutex);
+					state = RECONNECTING;
+					pthread_mutex_unlock(&mutex);
+				}
+			break;
+
+			case RECONNECTING:
+
+				pthread_mutex_lock(&mutex);
+				reconnect_uart();
+				reconnecting = false;
+				state = CONNECTED;
+				pthread_mutex_unlock(&mutex);
+		
+			break;
+
+
+			default:
+			break;
+		}
+	}
 
 	return 0;
 }

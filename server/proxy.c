@@ -9,11 +9,21 @@
 #include <errno.h> // Error integer and strerror() function
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
-#include <signal.h>
+#include <signal.h> 
+#include <dirent.h>
+#include <stdbool.h>
+
+enum State {CONNECTED, DISCONNECTED, RECONNECTING} state;
 
 struct sockaddr_in serv_addr, client;
-const char serial_port[] = "/dev/ttyUSB0"; 
+//const char serial_port[] = "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller-if00-port0"; 
 int fd, baudrate=B115200, client_socket;
+
+bool recon_socket = false, recon_uart = false, desconectado = false;
+
+pthread_mutex_t mutex;
+pthread_mutex_t mutex_uart;
+char devPort[] = "";
 
 /* ****************************************
  * Function name: setup_uart()
@@ -22,17 +32,35 @@ int fd, baudrate=B115200, client_socket;
  * 		Open UART communication
  * 
  *************************************** */
+
 int setup_uart() {
-	/* Start UART communication */
-	if((fd = open(serial_port, O_RDWR)) < 0) {
-		return 1;
-	}
-	/* Configure Port */	
+	char dev_port[15] = "/dev/";
+	DIR *mydir;
+    struct dirent *myfile;
+    mydir = opendir(dev_port);
+    while((myfile = readdir(mydir)) != NULL)
+    {      
+		if(strncmp(myfile->d_name, "ttyUSB",5) == 0){
+			strcat(dev_port, myfile->d_name);
+			/* Start UART communication */
+			strcpy(devPort, dev_port);
+			if((fd = open(dev_port, O_RDWR)) < 0) {
+			   fprintf(stderr, "Cannot open %s\n", dev_port);
+              return 1; // Exit ?
+			}
+		
+		}
+    }
+
+    closedir(mydir);
+
+	/* Configure Port */	///dev/ttyAMA0
 	struct termios tty;
 	memset(&tty, 0, sizeof tty);
 	/* Error Handling */
 	if (tcgetattr(fd, &tty) != 0) {
 		printf("[ERROR] result %i from tcgetattr: %s\n", errno, strerror(errno));
+		return 1;
 	}
 	tty.c_cflag &= ~PARENB; // Clear parity bit, disabling parity (most common)
 	tty.c_cflag &= ~CSTOPB; // Clear stop field, only one stop bit used in communication (most common)
@@ -56,12 +84,16 @@ int setup_uart() {
 	// Save tty settings, also checking for error
 	if (tcsetattr(fd, TCSANOW, &tty) != 0) {
    		printf("[ERROR] result %i from tcsetattr: %s\n", errno, strerror(errno));
+		return 1;
 	}
-	printf("[INFO] Serial communication opened, using port %s.\n", serial_port);
+
+	printf("[INFO] Serial communication opened, using port %s\n", dev_port);
+	
 	fflush(stdout);
 
 	return 0;
 }
+
 
 /* ****************************************
  * Function name: setup_socket()
@@ -76,7 +108,7 @@ int setup_socket() {
 	/* Listening socket */
 	if ((client_socket = socket(AF_INET, SOCK_STREAM, 0)) == 0) { 
 		printf("\n[ERROR] can't create socket \n"); 
-		return -1; 
+		return 1; 
 	} 
 	/* Allow address reuse on socket */
 	if (setsockopt(client_socket, SOL_SOCKET, SO_REUSEADDR , &opt, sizeof(opt))) {
@@ -93,25 +125,10 @@ int setup_socket() {
 		perror("[ERROR] can't connect to remote server.");
 		return 1;
 	}
-	printf("[INFO] socket created, listening to new connections. \n");
+
 	// Ignore broken pipe to avoid program finalization.
 	signal(SIGPIPE, SIG_IGN);
 	return 0;
-}
-
-/* ****************************************
- * Function name: reconnect_socket()
- * 
- * Description:
- * 		Reconnect socket
- * 
- *************************************** */
-void reconnect_socket() {
-	close(client_socket);
-	if (connect(client_socket, (struct sockaddr *)&client, sizeof(client)) < 0) {
-		perror("[WARNING] can't connect to remote server, will try again in 5 seconds...\n");
-		sleep(5);
-	}
 }
 
 /* ****************************************
@@ -123,10 +140,37 @@ void reconnect_socket() {
  *************************************** */
 void reconnect_uart() {
 	close(fd);
-	if((fd = open(serial_port, O_RDWR)) < 0) {
-		perror("[ERROR] can't connect to UART, will try again in 5 seconds...");
-	}
+
+	printf("[INFO] Reconnecting to UART ...\n");
+
+	setup_uart();
 }
+
+/* ****************************************
+ * Function name: reconnect_socket()
+ * 
+ * Description:
+ * 		Reconnect socket
+ * 
+ *************************************** */
+
+void reconnect_socket() {
+
+	close(client_socket);
+	
+
+	printf("[INFO] Reconnecting to SOCKET ...\n");
+
+	if((fd = open(devPort, O_RDWR)) < 0) {
+			pthread_mutex_lock(&mutex);
+		desconectado = true;
+		pthread_mutex_unlock(&mutex);
+	}
+		
+	setup_socket();
+	
+}
+
 
 /* ****************************************
  * Function name: thread_socket
@@ -135,23 +179,41 @@ void reconnect_uart() {
  * 		Forward socket data to UART
  * 
  *************************************** */
-void *thread_socket() {
+ void *thread_socket(void * arg) {
 	int valread;
 	char buffer[4096] = {0};
 	/* Reading all the time */
 	for(;;) {
-		memset(buffer, 0, sizeof(buffer));
-		valread = read(client_socket, buffer, sizeof(buffer));
-		if(valread > 0) {
-			printf("[INFO] forwarding data from socket to UART...\n");
-			int written = write(fd, buffer, valread);
-			if(written < 0) {
-				printf("[WARNING] can't write UART.\n");
-				reconnect_uart();
+	
+	if (state == CONNECTED){
+
+			memset(buffer, 0, sizeof(buffer));
+			valread = read(client_socket, buffer, sizeof(buffer));
+			//valread = recv(client_socket, buffer, sizeof(buffer), MSG_WAITALL);
+			if(valread > 0) {
+				printf("[INFO] forwarding data from socket to UART...\n");
+				int written = write(fd, buffer, valread);
+				//int written = send(fd, buffer, valread, 0);
+
+				if(written < 0) {
+					printf("[WARNING] can't write UART.\n");
+					pthread_mutex_lock(&mutex);
+					if (state == CONNECTED)
+					{
+						recon_uart = true;
+					}
+					pthread_mutex_unlock(&mutex);
+				}
+			} else if(valread <= 0) {
+				printf("[WARNING] can't read socket.\n");
+				//reconnect_socket();
+				pthread_mutex_lock(&mutex);
+				if (state == CONNECTED)
+				{
+					recon_socket = true;
+				}
+				pthread_mutex_unlock(&mutex);
 			}
-		} else if(valread < 0) {
-			printf("[WARNING] can't read socket.\n");
-			reconnect_socket();
 		}
 	} 
 }
@@ -163,22 +225,49 @@ void *thread_socket() {
  * 		Forward UART data to socket
  * 
  *************************************** */
-void *thread_uart() {
+ void * thread_uart(void * arg) {
 	int valread;
 	char buffer[4096] = {0}; 
 	/* Reading all the time */
 	for(;;) {
-		memset(buffer, 0, sizeof(buffer));
-		valread = read(fd, buffer, sizeof(buffer));
-		if (valread < 0) {
-			printf("[WARNING] can't read UART.\n");
-			reconnect_uart();
-		} else if(valread > 0) {
-			printf("[INFO] forwarding data from UART to socket...\n");
-			int written = write(client_socket, buffer, valread);
-			if (written < 0) {
-				printf("[WARNING] can't write socket... \n");
-				reconnect_socket();
+
+		if (state == CONNECTED)
+		{
+				/* code */
+			memset(buffer, 0, sizeof(buffer));
+			valread = read(fd, buffer, sizeof(buffer));
+			//valread = recv(fd, buffer, sizeof(buffer), MSG_WAITALL);
+
+			if (valread < 0) {
+				printf("[WARNING] can't read UART.\n");
+				// pthread_mutex_lock(&mutex_uart);
+				// reconnect_uart();
+				// pthread_mutex_unlock(&mutex_uart);
+				pthread_mutex_lock(&mutex);
+				if (state == CONNECTED)
+				{
+					recon_uart = true;
+				}
+				pthread_mutex_unlock(&mutex);
+			} 
+			else if(valread > 0) {
+				printf("[INFO] forwarding data from UART to socket...\n");
+				int written = write(client_socket, buffer, valread);
+				//ssize_t written = send(client_socket, buffer, valread, 0);
+				printf("Buffer: %s \n" ,buffer);
+				
+				if (written < 0) {
+					printf("[WARNING] can't write socket... \n");
+					//reconnect_socket(); 
+					// Habria que utiizar semoforos para que cuando leamos tenag el cerrojo y este cuando intente escriibir no puueda 
+					// y se tenbnga que esperar a que termine el otro
+					pthread_mutex_lock(&mutex);
+					if (state == CONNECTED)
+					{
+						recon_socket = true;
+					}
+					pthread_mutex_unlock(&mutex);
+				}
 			}
 		}
 	}
@@ -194,13 +283,70 @@ void *thread_uart() {
  *************************************** */
 int main() {
    	pthread_t h1, h2;
-	printf("KKK");
-	setup_uart();
-	setup_socket();
+		state = DISCONNECTED;
+	// setup_uart();
+	// setup_socket();
+    pthread_mutex_init(&mutex, NULL);
 	pthread_create(&h1, NULL, thread_socket, NULL);
    	pthread_create(&h2, NULL, thread_uart, NULL);
 	
-	for(;;) {}
+	// 
+	for(;;) {
+		switch (state)
+		{
+			case DISCONNECTED:
+				// Iniciar la comunicacion
+				pthread_mutex_lock(&mutex);		
+				int uart = setup_uart();
+				int socket = setup_socket();
+
+				if(uart == 0 && socket == 0){
+					state = CONNECTED;
+				}
+				desconectado = false;
+				recon_socket = false;
+				pthread_mutex_unlock(&mutex);
+			break;
+			
+			case CONNECTED:
+				if(desconectado) {
+					printf("Desconectado \n");
+					pthread_mutex_lock(&mutex);
+					state = DISCONNECTED;
+					pthread_mutex_unlock(&mutex);
+				
+				}
+				else if(recon_uart || recon_socket){
+					pthread_mutex_lock(&mutex);
+					state = RECONNECTING;
+					pthread_mutex_unlock(&mutex);
+
+				}
+			break;
+			
+			case RECONNECTING:
+				
+				
+				if(recon_uart){
+					pthread_mutex_lock(&mutex);
+					reconnect_uart();
+					recon_uart = false;
+					pthread_mutex_unlock(&mutex);
+				}
+
+				else if(recon_socket){
+					pthread_mutex_lock(&mutex);
+					reconnect_socket();
+					recon_socket = false;
+					pthread_mutex_unlock(&mutex);
+				}
+				pthread_mutex_lock(&mutex);
+				state = CONNECTED;
+				pthread_mutex_unlock(&mutex);
+				
+			break;
+		}
+	}
 
 	return 0;
 }
