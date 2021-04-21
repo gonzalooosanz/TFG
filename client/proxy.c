@@ -214,7 +214,8 @@ void reconnect_uart() {
 			pthread_mutex_lock(&mutex);
 			if (state == CONNECTED )
 			{
-				accepted = true;
+				//accepted = true;
+				accept_client();
 			}
 			pthread_mutex_unlock(&mutex);
 			
@@ -265,7 +266,8 @@ void reconnect_uart() {
 				pthread_mutex_lock(&mutex);
 				if (state == CONNECTED)
 				{
-					accepted = true;
+					//accepted = true;
+					accept_client();
 				}
 				pthread_mutex_unlock(&mutex);
 			}
