@@ -12,7 +12,7 @@
 #include <signal.h>
 #include <stdbool.h>
 
-enum State {CONNECTED, DISCONNECTED, RECONNECTING} state;
+enum State {CONNECTED, DISCONNECTED, RECONNECTING_UART, RECONNECTING_SOCK} state;
 
 struct sockaddr_in serv_addr, client;
 const char serial_port[] = "/dev/serial0";
@@ -58,7 +58,7 @@ int setup_uart() {
 	tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received bytes
 	tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
 	tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
-	tty.c_cc[VTIME] = 0; // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
+	tty.c_cc[VTIME] = 1; // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
 	tty.c_cc[VMIN] = 0;
 	// Set in/out baud rate to be 115200
 	cfsetispeed(&tty, baudrate);
@@ -214,8 +214,8 @@ void reconnect_uart() {
 			pthread_mutex_lock(&mutex);
 			if (state == CONNECTED )
 			{
-				//accepted = true;
-				accept_client();
+				accepted = true;
+				//accept_client();
 			}
 			pthread_mutex_unlock(&mutex);
 			
@@ -266,8 +266,8 @@ void reconnect_uart() {
 				pthread_mutex_lock(&mutex);
 				if (state == CONNECTED)
 				{
-					//accepted = true;
-					accept_client();
+					accepted = true;
+					//accept_client();
 				}
 				pthread_mutex_unlock(&mutex);
 			}
@@ -322,30 +322,38 @@ int main() {
 					pthread_mutex_unlock(&mutex);
 				
 				}
-				else if(accepted){
-					printf(" Aceptamos nuevas conexiones \n");
+				if(accepted){
 					pthread_mutex_lock(&mutex);
-					accept_client();
-				
-					accepted = false;
+					state = RECONNECTING_SOCK;
 					pthread_mutex_unlock(&mutex);
 				}
 
-				else if(reconnecting){
+				if(reconnecting){
 					pthread_mutex_lock(&mutex);
-					state = RECONNECTING;
+					state = RECONNECTING_UART;
 					pthread_mutex_unlock(&mutex);
 				}
 			break;
 
-			case RECONNECTING:
-
+			case RECONNECTING_SOCK:
+				close(client_socket);
+				printf(" Aceptamos nuevas conexiones \n");
+				//sleep(6);
+				accept_client();
 				pthread_mutex_lock(&mutex);
-				reconnect_uart();
+				accepted = false;
+				state = CONNECTED;
+				pthread_mutex_unlock(&mutex);
+	
+			break;
+
+			case RECONNECTING_UART:
+				close(fd);
+				setup_uart();
+				pthread_mutex_lock(&mutex);
 				reconnecting = false;
 				state = CONNECTED;
 				pthread_mutex_unlock(&mutex);
-		
 			break;
 
 

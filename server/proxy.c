@@ -13,7 +13,7 @@
 #include <dirent.h>
 #include <stdbool.h>
 
-enum State {CONNECTED, DISCONNECTED, RECONNECTING} state;
+enum State {CONNECTED, DISCONNECTED, RECONNECTING_UART, RECONNECTING_SOCKET} state;
 
 struct sockaddr_in serv_addr, client;
 //const char serial_port[] = "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller-if00-port0"; 
@@ -76,7 +76,7 @@ int setup_uart() {
 	tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received bytes
 	tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
 	tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
-	tty.c_cc[VTIME] = 0; // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
+	tty.c_cc[VTIME] = 1; // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
 	tty.c_cc[VMIN] = 0;
 	// Set in/out baud rate to be 115200
 	cfsetispeed(&tty, baudrate);
@@ -157,18 +157,25 @@ void reconnect_uart() {
 void reconnect_socket() {
 
 	close(client_socket);
-	
 
 	printf("[INFO] Reconnecting to SOCKET ...\n");
+	//sleep(5);
+	// if((fd = open(devPort, O_RDWR)) < 0) {
+	
+	// }
 
-	if((fd = open(devPort, O_RDWR)) < 0) {
-			pthread_mutex_lock(&mutex);
+	FILE *stream;
+	stream = fopen(devPort, "r");
+
+	if ( ftell(stream) < 0 )
+	{	
+		printf("Se ha cerrado");
+		pthread_mutex_lock(&mutex);
 		desconectado = true;
 		pthread_mutex_unlock(&mutex);
 	}
 		
 	setup_socket();
-	
 }
 
 
@@ -185,7 +192,7 @@ void reconnect_socket() {
 	/* Reading all the time */
 	for(;;) {
 	
-	if (state == CONNECTED){
+		if (state == CONNECTED){
 
 			memset(buffer, 0, sizeof(buffer));
 			valread = read(client_socket, buffer, sizeof(buffer));
@@ -204,15 +211,18 @@ void reconnect_socket() {
 					}
 					pthread_mutex_unlock(&mutex);
 				}
-			} else if(valread <= 0) {
+			} 
+			else if(valread <= 0) {
 				printf("[WARNING] can't read socket.\n");
 				//reconnect_socket();
-				pthread_mutex_lock(&mutex);
+				
 				if (state == CONNECTED)
 				{
+					pthread_mutex_lock(&mutex);
 					recon_socket = true;
+					pthread_mutex_unlock(&mutex);
 				}
-				pthread_mutex_unlock(&mutex);
+				
 			}
 		}
 	} 
@@ -261,12 +271,14 @@ void reconnect_socket() {
 					//reconnect_socket(); 
 					// Habria que utiizar semoforos para que cuando leamos tenag el cerrojo y este cuando intente escriibir no puueda 
 					// y se tenbnga que esperar a que termine el otro
-					pthread_mutex_lock(&mutex);
+				
 					if (state == CONNECTED)
 					{
+						pthread_mutex_lock(&mutex);
 						recon_socket = true;
+						pthread_mutex_unlock(&mutex);
 					}
-					pthread_mutex_unlock(&mutex);
+					
 				}
 			}
 		}
@@ -316,34 +328,49 @@ int main() {
 					pthread_mutex_unlock(&mutex);
 				
 				}
-				else if(recon_uart || recon_socket){
+			    if(recon_uart){
 					pthread_mutex_lock(&mutex);
-					state = RECONNECTING;
+					state = RECONNECTING_UART;
+					pthread_mutex_unlock(&mutex);
+
+				}
+			    if (recon_socket)
+				{
+			
+					pthread_mutex_lock(&mutex);
+					state = RECONNECTING_SOCKET;
 					pthread_mutex_unlock(&mutex);
 
 				}
 			break;
-			
-			case RECONNECTING:
-				
-				
-				if(recon_uart){
-					pthread_mutex_lock(&mutex);
-					reconnect_uart();
-					recon_uart = false;
-					pthread_mutex_unlock(&mutex);
-				}
 
-				else if(recon_socket){
-					pthread_mutex_lock(&mutex);
-					reconnect_socket();
-					recon_socket = false;
-					pthread_mutex_unlock(&mutex);
-				}
+			case RECONNECTING_UART:
+				reconnect_uart();
+				close(fd);
+				printf("[INFO] Reconnecting to UART...\n");
+				setup_uart();
 				pthread_mutex_lock(&mutex);
+				recon_uart = false;
 				state = CONNECTED;
 				pthread_mutex_unlock(&mutex);
 				
+			break;
+
+			case RECONNECTING_SOCKET:
+			
+			
+				close(client_socket);
+				printf("[INFO] Reconnecting to SOCKET...\n");
+				sleep(1);
+				if((fd = open(devPort, O_RDWR)) < 0) { 
+					close(fd);
+					setup_uart();
+				}
+				setup_socket();
+				pthread_mutex_lock(&mutex);
+				state = CONNECTED;
+				recon_socket = false;
+				pthread_mutex_unlock(&mutex);
 			break;
 		}
 	}
