@@ -192,13 +192,13 @@ void reconnect_uart() {
 		{
 		memset(buffer, 0, sizeof(buffer));
 		valread = read(client_socket, buffer, sizeof(buffer));
-		//valread = recv(client_socket, buffer, sizeof(buffer), MSG_WAITALL);
+		//valread = recv(client_socket, buffer, sizeof(buffer), 0);
 		if(valread > 0) {
 			printf("[INFO] forwarding data from socket to UART...\n");
 		
 			int written = write(fd, buffer, valread);
 			printf("Buffer : %s \n" ,buffer);
-			//int written = send(fd, buffer, valread, 0);
+			//ssize_t written = send(fd, buffer, valread, 0);
 			if(written < 0) {
 				printf("[WARNING] can't write UART.\n");
 				pthread_mutex_lock(&mutex);
@@ -220,12 +220,6 @@ void reconnect_uart() {
 			pthread_mutex_unlock(&mutex);
 			
 		}
-		// if(accepted){
-		// 	pthread_mutex_lock(&mutex);
-		// 	accept_client();
-		// 	accepted = false;
-		// 	pthread_mutex_unlock(&mutex);
-		// }
 	}
 }
  }
@@ -338,7 +332,7 @@ int main() {
 			case RECONNECTING_SOCK:
 				close(client_socket);
 				printf(" Aceptamos nuevas conexiones \n");
-				//sleep(6);
+				//sleep(1);
 				accept_client();
 				pthread_mutex_lock(&mutex);
 				accepted = false;

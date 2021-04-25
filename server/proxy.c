@@ -46,7 +46,7 @@ int setup_uart() {
 			strcpy(devPort, dev_port);
 			if((fd = open(dev_port, O_RDWR)) < 0) {
 			   fprintf(stderr, "Cannot open %s\n", dev_port);
-              return 1; // Exit ?
+              	return 1; // Exit ?
 			}
 		
 		}
@@ -76,7 +76,7 @@ int setup_uart() {
 	tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received bytes
 	tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
 	tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
-	tty.c_cc[VTIME] = 1; // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
+	tty.c_cc[VTIME] = 0; // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
 	tty.c_cc[VMIN] = 0;
 	// Set in/out baud rate to be 115200
 	cfsetispeed(&tty, baudrate);
@@ -126,58 +126,25 @@ int setup_socket() {
 		return 1;
 	}
 
+	struct timeval tv;
+	tv.tv_sec = 10;
+	tv.tv_usec = 0;
+	setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+
 	// Ignore broken pipe to avoid program finalization.
 	signal(SIGPIPE, SIG_IGN);
 	return 0;
 }
 
-/* ****************************************
- * Function name: reconnect_uart()
- * 
- * Description:
- * 		Reconnect UART
- * 
- *************************************** */
-void reconnect_uart() {
+void reconnect_uart(){
+
 	close(fd);
 
-	printf("[INFO] Reconnecting to UART ...\n");
+	printf("Reconnecting to UART... \n");
 
 	setup_uart();
+
 }
-
-/* ****************************************
- * Function name: reconnect_socket()
- * 
- * Description:
- * 		Reconnect socket
- * 
- *************************************** */
-
-void reconnect_socket() {
-
-	close(client_socket);
-
-	printf("[INFO] Reconnecting to SOCKET ...\n");
-	//sleep(5);
-	// if((fd = open(devPort, O_RDWR)) < 0) {
-	
-	// }
-
-	FILE *stream;
-	stream = fopen(devPort, "r");
-
-	if ( ftell(stream) < 0 )
-	{	
-		printf("Se ha cerrado");
-		pthread_mutex_lock(&mutex);
-		desconectado = true;
-		pthread_mutex_unlock(&mutex);
-	}
-		
-	setup_socket();
-}
-
 
 /* ****************************************
  * Function name: thread_socket
@@ -200,7 +167,7 @@ void reconnect_socket() {
 			if(valread > 0) {
 				printf("[INFO] forwarding data from socket to UART...\n");
 				int written = write(fd, buffer, valread);
-				//int written = send(fd, buffer, valread, 0);
+				//ssize_t written = send(fd, buffer, valread, 0);
 
 				if(written < 0) {
 					printf("[WARNING] can't write UART.\n");
@@ -246,13 +213,24 @@ void reconnect_socket() {
 				/* code */
 			memset(buffer, 0, sizeof(buffer));
 			valread = read(fd, buffer, sizeof(buffer));
+			// fd_set rset;
+			// struct timeval tv;
+			// FD_ZERO(&rset);
+			// FD_SET(fd, &rset);
+
+			// tv.tv_sec = 10;
+			// tv.tv_usec = 0;
+
+			// if ((select(fd + 1, &rset, NULL, NULL, &tv)) < 0){
+
+			// 	perror("Error con el select \n");
+			// 	return 1;
+			// }
+
 			//valread = recv(fd, buffer, sizeof(buffer), MSG_WAITALL);
 
 			if (valread < 0) {
 				printf("[WARNING] can't read UART.\n");
-				// pthread_mutex_lock(&mutex_uart);
-				// reconnect_uart();
-				// pthread_mutex_unlock(&mutex_uart);
 				pthread_mutex_lock(&mutex);
 				if (state == CONNECTED)
 				{
