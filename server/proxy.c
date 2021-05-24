@@ -126,11 +126,6 @@ int setup_socket() {
 		return 1;
 	}
 
-	struct timeval tv;
-	tv.tv_sec = 10;
-	tv.tv_usec = 0;
-	setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
-
 	// Ignore broken pipe to avoid program finalization.
 	signal(SIGPIPE, SIG_IGN);
 	return 0;

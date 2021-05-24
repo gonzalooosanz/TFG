@@ -155,10 +155,10 @@ void accept_client() {
 	char *client_ip = inet_ntoa(client.sin_addr);
 	printf("[INFO] accepted new connection from client %s:%d\n", client_ip, ntohs(client.sin_port));
 
-	struct timeval tv;
-	tv.tv_sec = 10;
-	tv.tv_usec = 0;
-	setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+	// struct timeval tv;
+	// tv.tv_sec = 10;
+	// tv.tv_usec = 0;
+	// setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 }
 
 /* ****************************************
@@ -209,7 +209,7 @@ void reconnect_uart() {
 				pthread_mutex_unlock(&mutex);
 				
 			}
-		} else if(valread <= 0) {
+		} else if(valread < 0) {
 			printf("[WARNING] can't read socket.\n");
 			pthread_mutex_lock(&mutex);
 			if (state == CONNECTED )
