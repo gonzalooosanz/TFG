@@ -14,7 +14,7 @@ A continuación viene un esquema de los pasos necesarios para hacer funcionar el
 
 ### Pasos a seguir en Raspberry PI (Instalación):
 1. Instalación de Eclipse paho para poder compilar y ejecutar tanto la API como la aplicación cliente.
-2. Configurar acceso a UART (ver guía en documento TFM Pedro).
+2. Configurar acceso a UART.
 3. (Opcional) Instalación de git para poder clonar el repositorio.
 4. Clonar repositorio ([MQTT_API]).
 5. Compilar proxy ('client/proxy.c'), API - MQTT ('proxy/client/MQTT_API.c') y aplicación cliente ('client/client.c').
