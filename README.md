@@ -15,5 +15,5 @@ La memoria y la presentacion del propio proyecto grabada las encontrará en el s
 
 https://drive.google.com/drive/u/1/folders/1_zayztYqk55CR9hLDDRddcv2HTTyplXB
 
-[![Presentacion del TFG](https://img.youtube.com/vi/J3YLuJ0E_II/1.jpg)](https://www.youtube.com/watch?v=J3YLuJ0E_II)
+[![Presentacion del TFG](https://img.youtube.com/vi/J3YLuJ0E_II/0.jpg)](https://www.youtube.com/watch?v=J3YLuJ0E_II)
 
