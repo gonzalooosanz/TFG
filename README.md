@@ -9,30 +9,11 @@ El software en este repositorio contiene los siguientes componentes
 Mas información sobre la idea del proxy:
 https://www.digi.com/resources/documentation/Digidocs/90001541/tasks/t_use_mqtt.htm
 
-## Instalación y uso:
-A continuación viene un esquema de los pasos necesarios para hacer funcionar el sistema.
+## Memoria 
 
-### Pasos a seguir en Raspberry PI (Instalación):
-1. Instalación de Eclipse paho para poder compilar y ejecutar tanto la API como la aplicación cliente.
-2. Configurar acceso a UART.
-3. (Opcional) Instalación de git para poder clonar el repositorio.
-4. Clonar repositorio ([MQTT_API]).
-5. Compilar proxy ('client/proxy.c'), API - MQTT ('proxy/client/MQTT_API.c') y aplicación cliente ('client/client.c').
+La memoria y la presentacion del propio proyecto grabada las encontrará en el siguiente enlace. 
 
-### Pasos a seguir en PC (Instalación):
-1. (Opcional) Instalar XCTU (en caso de que haya que configurar módulos XBee).
-2. Instalación del broker MQTT (mosquitto)
-3. (Opcional) Instalación de git para poder clonar el repositorio.
-4. Clonar repositorio ([MQTT_API]).
-5. Compilar proxy ('server/proxy.c').
+https://drive.google.com/drive/u/1/folders/1_zayztYqk55CR9hLDDRddcv2HTTyplXB
 
-### Puesta en marcha
-1 En PC:
-  - Conectar Hardware XBee (FTDI).
-  - Ejecutar proxy ('server/proxy').
-2. En Raspberry PI:
-  - Conectar Hardware XBee (UART).
-  - Ejecutar proxy ('client/proxy').
-  - Ejecutar cliente ('client/client.c').
-
+[![Watch the video](https://i.imgur.com/vKb2F1B.png)](https://www.youtube.com/watch?v=J3YLuJ0E_II)
 
